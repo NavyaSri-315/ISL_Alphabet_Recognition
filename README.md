@@ -1,16 +1,16 @@
-# ISL Alphabet Recognition
+# 🤟ISL Alphabet Recognition
 
 **An AI-powered Indian Sign Language (ISL) alphabet recognition system using Computer Vision and Machine Learning.**
 
 This system recognizes Indian Sign Language manual alphabet gestures (A–Z) through a webcam and converts them into readable English letters in real time. It combines MediaPipe hand-landmark detection with machine learning classification to provide an interactive sign recognition and learning experience.
 
-## Overview
+## 📌Overview
 
 Traditional image-based recognition systems can be computationally expensive and sensitive to background variations. SignSpeak addresses this challenge by extracting hand landmarks from images and using these coordinates as features for classification rather than training directly on raw image pixels.
 
 The project demonstrates a complete machine learning workflow, from feature extraction and preprocessing to model comparison, real-time inference, and web-based deployment.
 
-## Features
+##✨ Features
 
 - **Real-Time Recognition:** Recognizes ISL alphabet gestures using a webcam.
 - **Hand Landmark Detection:** Uses MediaPipe to detect 21 landmarks per hand.
@@ -20,7 +20,7 @@ The project demonstrates a complete machine learning workflow, from feature extr
 - **Visual Hand Tracking:** Uses OpenCV to display the camera feed and detected hand landmarks.
 - **Interactive Learning Interface:** Includes an ISL alphabet reference section with sign-learning guidance and a visual alphabet chart.
 
-## Tech Stack
+##🛠️ Tech Stack
 
 | Technology | Purpose |
 |---|---|
@@ -33,7 +33,7 @@ The project demonstrates a complete machine learning workflow, from feature extr
 | Streamlit | Interactive web interface |
 | Pickle | Saving and loading the trained model |
 
-## Machine Learning Workflow
+##🔄  Machine Learning Workflow
 
 The system follows a structured pipeline:
 
@@ -53,7 +53,7 @@ The system follows a structured pipeline:
 
 These transformations help the classifier focus on the relative geometry of the hand.
 
-## Machine Learning Algorithms
+##🌲 Machine Learning Algorithms
 
 Five classifiers were trained and compared:
 
@@ -65,7 +65,7 @@ Five classifiers were trained and compared:
 
 The best-performing model from the evaluation is saved for inference. Model selection should be based on the final evaluation results rather than accuracy alone.
 
-## Application Interface
+##🖥️ Application Interface
 
 SignSpeak includes two main sections:
 
@@ -81,7 +81,7 @@ SignSpeak includes two main sections:
 - Provides an A–Z reference for manual alphabet signs.
 - Offers visual learning guidance for users practising ISL alphabet gestures.
 
-## Project Structure
+##📂 Project Structure
 
 ```text
 SignSpeak/
@@ -98,7 +98,7 @@ SignSpeak/
 
 *Note: The structure above represents the main files used in the workflow. Dataset folders, generated files, and additional resources may vary in your local repository.*
 
-## Installation and Setup
+##⚙️ Installation and Setup
 
 ### Prerequisites
 
@@ -147,7 +147,7 @@ streamlit run app.py
 
 Open the local URL displayed in the terminal by Streamlit. Allow camera access when prompted to use live recognition.
 
-## Running the Machine Learning Pipeline
+##🔬 Running the Machine Learning Pipeline
 
 If you want to reproduce the model-building workflow, execute the scripts in the appropriate order:
 
@@ -169,21 +169,21 @@ The application requires the saved model and the expected feature format to be a
 - Computer vision and machine learning experimentation
 - Prototyping assistive communication technologies
 
-## Limitations
+##⚠️ Limitations
 
 - The current scope is manual alphabet recognition (A–Z), not continuous sign language sentence translation.
 - Recognition depends on successful hand detection, image quality, lighting, and hand visibility.
 - Performance may vary between the training dataset and real-world webcam conditions.
 - The system's output is a machine learning prediction and should not be treated as a guaranteed interpretation of a sign.
 
-## Future Improvements
+##🚀 Future Improvements
 
 - Expand recognition to additional ISL gestures and vocabulary.
 - Improve robustness across lighting conditions, camera angles, and diverse environments.
 - Explore continuous gesture recognition and word-level prediction.
 - Evaluate generalization using independent real-world test data.
 
-## Learning Outcomes
+##🎓 Learning Outcomes
 
 Through this project, I explored:
 
