@@ -1,7 +1,6 @@
 opencv-python
-mediapipe
+mediapipe==0.10.21
 pandas
 scikit-learn
 streamlit
-mlxtend
 numpy
