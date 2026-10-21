@@ -1,19 +1,28 @@
 
-import streamlit as st
+import os
+import pickle
+
+import av
 import cv2
 import mediapipe as mp
 import numpy as np
-import pickle
-import os
+import streamlit as st
+from streamlit_webrtc import VideoProcessorBase, webrtc_streamer
 
-# --- Page Configuration ---
+
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
 st.set_page_config(
     page_title="ISL Recognition",
     page_icon="🤞",
     layout="wide"
 )
 
-# --- Custom Styling ---
+
+# =========================================================
+# CUSTOM STYLING — ORIGINAL GREEN THEME
+# =========================================================
 st.markdown("""
 <style>
 .block-container {
@@ -21,14 +30,17 @@ st.markdown("""
     padding-bottom: 2rem !important;
     max-width: 100% !important;
 }
+
 header[data-testid="stHeader"] {
     display: none !important;
 }
+
 .stApp {
     background-color: #f7f9f8;
     color: #1b2622;
     font-family: 'Inter', sans-serif;
 }
+
 .top-banner {
     background: #ffffff;
     padding: 20px 24px;
@@ -37,6 +49,7 @@ header[data-testid="stHeader"] {
     margin-bottom: 20px;
     box-shadow: 0 4px 15px rgba(0,0,0,0.03);
 }
+
 .card-box {
     background-color: #ffffff;
     padding: 24px;
@@ -45,6 +58,7 @@ header[data-testid="stHeader"] {
     box-shadow: 0 4px 15px rgba(0,0,0,0.04);
     margin-bottom: 10px;
 }
+
 .big-letter {
     font-size: 85px;
     font-weight: 800;
@@ -53,6 +67,7 @@ header[data-testid="stHeader"] {
     line-height: 1;
     margin: 10px 0;
 }
+
 button[data-baseweb="tab"] {
     font-size: 16px !important;
     font-weight: 700 !important;
@@ -61,11 +76,13 @@ button[data-baseweb="tab"] {
     border-radius: 8px 8px 0 0 !important;
     padding: 10px 20px !important;
 }
+
 button[data-baseweb="tab"][aria-selected="true"] {
     color: #114b3e !important;
     background-color: #e1f0ec !important;
     border-bottom: 3px solid #114b3e !important;
 }
+
 div[data-baseweb="tab-highlight"] {
     background-color: #114b3e !important;
 }
@@ -73,59 +90,168 @@ div[data-baseweb="tab-highlight"] {
 """, unsafe_allow_html=True)
 
 
-# --- Load Trained Model ---
-model_path = "isl_model.pkl"
+# =========================================================
+# LOAD TRAINED MODEL
+# =========================================================
+MODEL_PATH = "isl_model.pkl"
 
-if not os.path.exists(model_path):
+if not os.path.exists(MODEL_PATH):
     st.error(
-        f"Error: '{model_path}' not found! "
-        "Please run 'train_models.py' first."
+        f"Error: '{MODEL_PATH}' not found! "
+        "Please ensure the trained model is available."
     )
     st.stop()
 
 try:
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-except Exception as e:
-    st.error(f"Could not load the trained model: {e}")
+    with open(MODEL_PATH, "rb") as model_file:
+        model = pickle.load(model_file)
+except Exception as error:
+    st.error(f"Could not load the trained model: {error}")
     st.stop()
 
 
-# --- Initialize MediaPipe ---
-# Use the Legacy Solutions API consistently.
+# =========================================================
+# MEDIAPIPE INITIALIZATION
+# =========================================================
 mp_hands = mp.solutions.hands
 mp_draw = mp.solutions.drawing_utils
 
-# Streamlit caches this resource so reruns don't repeatedly initialize it.
-@st.cache_resource
-def get_hands_detector():
-    return mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.7,
-        min_tracking_confidence=0.5
-    )
 
-hands = get_hands_detector()
+# =========================================================
+# VIDEO PROCESSOR
+# Runs on frames received from the user's browser.
+# =========================================================
+class SignSpeakVideoProcessor(VideoProcessorBase):
+
+    def __init__(self):
+        self.hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.5
+        )
+
+        self.predicted_char = "-"
+        self.confidence_text = "—"
+        self.status_text = "Show a hand sign"
+
+    def recv(self, frame):
+        # Convert the incoming browser frame into an OpenCV image.
+        image = frame.to_ndarray(format="bgr24")
+
+        # Mirror the image like a selfie camera.
+        image = cv2.flip(image, 1)
+
+        # MediaPipe expects RGB input.
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_image)
+
+        predicted_char = "-"
+        confidence_text = "—"
+        status_text = "No hand detected"
+
+        if results.multi_hand_landmarks:
+
+            # Draw landmarks for all detected hands.
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(
+                    image,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_draw.DrawingSpec(
+                        color=(17, 75, 62),
+                        thickness=2,
+                        circle_radius=3
+                    ),
+                    mp_draw.DrawingSpec(
+                        color=(82, 183, 136),
+                        thickness=2,
+                        circle_radius=2
+                    )
+                )
+
+            # Use the first detected hand for prediction,
+            # matching the original model input format.
+            first_hand = results.multi_hand_landmarks[0]
+
+            coords = np.array(
+                [[landmark.x, landmark.y]
+                 for landmark in first_hand.landmark],
+                dtype=np.float32
+            )
+
+            # Normalize coordinates relative to the wrist.
+            wrist = coords[0]
+            normalized_coords = coords - wrist
+
+            max_distance = np.max(
+                np.sqrt(
+                    np.sum(normalized_coords ** 2, axis=1)
+                )
+            )
+
+            if max_distance > 0:
+                normalized_coords = normalized_coords / max_distance
+
+                # 21 landmarks × (x, y) = 42 features.
+                features = normalized_coords.flatten().reshape(1, -1)
+
+                try:
+                    prediction = model.predict(features)
+                    predicted_char = str(prediction[0])
+                    status_text = "Sign detected"
+
+                    # Show model confidence if supported.
+                    if hasattr(model, "predict_proba"):
+                        try:
+                            probabilities = model.predict_proba(features)[0]
+                            confidence_text = (
+                                f"{np.max(probabilities) * 100:.1f}%"
+                            )
+                        except Exception:
+                            confidence_text = "Unavailable"
+                    else:
+                        confidence_text = "Unavailable"
+
+                except Exception:
+                    predicted_char = "-"
+                    confidence_text = "Unavailable"
+                    status_text = "Prediction failed"
+
+        # Save the latest result for the Streamlit UI.
+        self.predicted_char = predicted_char
+        self.confidence_text = confidence_text
+        self.status_text = status_text
+
+        # Return the processed frame with the skeleton overlay.
+        return av.VideoFrame.from_ndarray(
+            image,
+            format="bgr24"
+        )
 
 
-# --- Tabs ---
+# =========================================================
+# TABS
+# =========================================================
 tab1, tab2 = st.tabs([
     "📷 Live Recognition",
     "📖 Learn ISL Alphabet"
 ])
 
 
-# ================= TAB 1: LIVE RECOGNITION =================
+# =========================================================
+# TAB 1 — LIVE RECOGNITION
+# =========================================================
 with tab1:
 
     st.markdown("""
     <div class="top-banner">
-        <h2 style="margin:0; color:#114b3e; font-size:24px; font-weight:700;">
+        <h2 style="margin:0; color:#114b3e; font-size:24px;
+                   font-weight:700;">
             Turn your signs into letters.
         </h2>
         <p style="margin:6px 0 0 0; color:#5c6f66; font-size:15px;">
-            Show one or two ISL alphabet signs to your camera.
+            Show your ISL alphabet signs to your camera.
             Skeleton tracking supports up to two hands.
         </p>
     </div>
@@ -141,187 +267,104 @@ with tab1:
 
     with col_cam:
         st.markdown("### 📹 Live camera")
-        video_placeholder = st.empty()
+
+        if run_cam:
+            webrtc_ctx = webrtc_streamer(
+                key="signspeak-camera",
+                video_processor_factory=SignSpeakVideoProcessor,
+                media_stream_constraints={
+                    "video": True,
+                    "audio": False
+                },
+                async_processing=True
+            )
+        else:
+            st.markdown("""
+            <div class="card-box"
+                 style="text-align:center; padding:100px 20px;
+                        color:#5c6f66;">
+                <h3>Camera feed appears here</h3>
+                <p>Toggle the switch above to activate your webcam.</p>
+            </div>
+            """, unsafe_allow_html=True)
+
         st.caption("Position your hands clearly inside the frame.")
 
     with col_res:
         st.markdown("### 🎯 Recognition result")
-        pred_box = st.empty()
 
-        pred_box.markdown("""
+        result_placeholder = st.empty()
+
+        result_placeholder.markdown("""
         <div class="card-box"
-             style="text-align:center; min-height:240px;
-                    display:flex; flex-direction:column;
-                    justify-content:center;">
+             style="text-align:center; min-height:240px;">
             <p class="big-letter">-</p>
-            <p style="color:#114b3e; font-size:16px;
-                      font-weight:600; margin:0;">
+            <p style="color:#114b3e; font-size:16px; font-weight:600;">
                 Predicted letter
             </p>
             <hr style="border-color:#e2e8f0; margin:18px 0;">
-            <p style="color:#5c6f66; font-size:14px; margin:0;">
+            <p style="color:#5c6f66; font-size:14px;">
                 Confidence: — | Waiting for a sign
             </p>
         </div>
         """, unsafe_allow_html=True)
 
-        st.caption("Show the predicted letter clearly.")
-
+    # Refresh only the prediction panel periodically.
+    # The WebRTC component continues receiving browser frames
+    # independently of these UI refreshes.
     if run_cam:
 
-        cap = cv2.VideoCapture(0)
+        @st.fragment(run_every=0.3)
+        def update_prediction():
+            processor = webrtc_ctx.video_processor
 
-        if not cap.isOpened():
-            st.error(
-                "Could not access your webcam. Check the connection, "
-                "camera permissions, and whether another app is using it."
-            )
-            cap.release()
+            if not webrtc_ctx.state.playing:
+                result_placeholder.markdown("""
+                <div class="card-box" style="text-align:center;
+                                             min-height:240px;">
+                    <p class="big-letter">-</p>
+                    <p style="color:#114b3e; font-weight:600;">
+                        Predicted letter
+                    </p>
+                    <p style="color:#5c6f66;">
+                        Start the camera to recognize a sign.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                return
 
-        else:
-            try:
-                while True:
+            if processor is None:
+                return
 
-                    # Allow Streamlit to process user interactions between frames.
-                    if not st.session_state.get("camera_toggle", False):
-                        break
+            letter = processor.predicted_char
+            confidence = processor.confidence_text
+            status = processor.status_text
 
-                    ret, frame = cap.read()
+            result_placeholder.markdown(f"""
+            <div class="card-box"
+                 style="text-align:center; min-height:240px;">
+                <p class="big-letter">{letter}</p>
+                <p style="color:#114b3e; font-size:16px;
+                          font-weight:600; margin:0;">
+                    Predicted letter
+                </p>
+                <hr style="border-color:#e2e8f0; margin:18px 0;">
+                <p style="color:#114b3e; font-size:14px;
+                          font-weight:600;">
+                    Model confidence: {confidence}
+                </p>
+                <p style="color:#5c6f66; font-size:13px;">
+                    {status}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
-                    if not ret:
-                        st.warning("Could not read a frame from the webcam.")
-                        break
-
-                    # Mirror the webcam image.
-                    frame = cv2.flip(frame, 1)
-
-                    # MediaPipe expects RGB images.
-                    img_rgb = cv2.cvtColor(
-                        frame,
-                        cv2.COLOR_BGR2RGB
-                    )
-
-                    results = hands.process(img_rgb)
-
-                    predicted_char = "-"
-                    confidence_text = "—"
-
-                    if results.multi_hand_landmarks:
-
-                        # Draw skeletons for every detected hand.
-                        for hand_landmarks in results.multi_hand_landmarks:
-                            mp_draw.draw_landmarks(
-                                frame,
-                                hand_landmarks,
-                                mp_hands.HAND_CONNECTIONS,
-                                mp_draw.DrawingSpec(
-                                    color=(17, 75, 62),
-                                    thickness=2,
-                                    circle_radius=3
-                                ),
-                                mp_draw.DrawingSpec(
-                                    color=(82, 183, 136),
-                                    thickness=2,
-                                    circle_radius=2
-                                )
-                            )
-
-                        # Preserve the existing model's feature format:
-                        # first detected hand, 21 landmarks, x and y.
-                        first_hand = results.multi_hand_landmarks[0]
-
-                        coords = np.array(
-                            [[lm.x, lm.y] for lm in first_hand.landmark],
-                            dtype=np.float32
-                        )
-
-                        # Normalize coordinates relative to the wrist.
-                        wrist = coords[0]
-                        norm_coords = coords - wrist
-
-                        max_dist = np.max(
-                            np.sqrt(
-                                np.sum(norm_coords ** 2, axis=1)
-                            )
-                        )
-
-                        if max_dist > 0:
-
-                            norm_coords = norm_coords / max_dist
-
-                            features = norm_coords.flatten().reshape(1, -1)
-
-                            # Predict the sign.
-                            prediction = model.predict(features)
-                            predicted_char = str(prediction[0])
-
-                            # Calculate confidence only when supported by model.
-                            if hasattr(model, "predict_proba"):
-                                try:
-                                    probabilities = model.predict_proba(
-                                        features
-                                    )[0]
-
-                                    confidence_text = (
-                                        f"{np.max(probabilities) * 100:.1f}%"
-                                    )
-                                except Exception:
-                                    confidence_text = "Unavailable"
-                            else:
-                                confidence_text = "Unavailable"
-
-                    # Display prediction.
-                    pred_box.markdown(f"""
-                    <div class="card-box"
-                         style="text-align:center; min-height:240px;
-                                display:flex; flex-direction:column;
-                                justify-content:center;">
-                        <p class="big-letter">{predicted_char}</p>
-                        <p style="color:#114b3e; font-size:16px;
-                                  font-weight:600; margin:0;">
-                            Predicted letter
-                        </p>
-                        <hr style="border-color:#e2e8f0; margin:18px 0;">
-                        <p style="color:#114b3e; font-size:14px;
-                                  margin:0; font-weight:600;">
-                            Model confidence: {confidence_text}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # Display webcam frame.
-                    frame_disp = cv2.cvtColor(
-                        frame,
-                        cv2.COLOR_BGR2RGB
-                    )
-
-                    video_placeholder.image(
-                        frame_disp,
-                        channels="RGB",
-                        use_container_width=True
-                    )
-
-                    # Avoid maxing out the CPU.
-                    cv2.waitKey(1)
-
-            except Exception as e:
-                st.error(f"Camera recognition error: {e}")
-
-            finally:
-                cap.release()
-
-    else:
-        video_placeholder.markdown("""
-        <div class="card-box"
-             style="text-align:center; padding:100px 20px;
-                    color:#5c6f66;">
-            <h3>Camera feed appears here</h3>
-            <p>Toggle the switch above to activate your webcam.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        update_prediction()
 
 
-# ================= TAB 2: LEARN ISL ALPHABET =================
+# =========================================================
+# TAB 2 — LEARN ISL ALPHABET
+# =========================================================
 with tab2:
 
     st.markdown("""
@@ -341,10 +384,9 @@ with tab2:
     st.image(
         "https://enablemart.in/wp-content/uploads/2025/04/ISL-Basic.png",
         caption="Indian Sign Language Manual Alphabet Reference",
-        use_container_width=True
+        width="stretch"
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### 📋 Quick Hand Gesture Reference Guide")
 
     isl_guides = {
@@ -378,8 +420,8 @@ with tab2:
 
     cols = st.columns(3)
 
-    for i, (letter, desc) in enumerate(isl_guides.items()):
-        with cols[i % 3]:
+    for index, (letter, description) in enumerate(isl_guides.items()):
+        with cols[index % 3]:
             st.markdown(f"""
             <div class="card-box"
                  style="margin-bottom:15px; padding:15px 20px;">
@@ -388,9 +430,7 @@ with tab2:
                 </h4>
                 <p style="color:#5c6f66; font-size:13px;
                           margin:5px 0 0 0;">
-                    {desc}
+                    {description}
                 </p>
             </div>
             """, unsafe_allow_html=True)
-
-
